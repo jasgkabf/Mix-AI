@@ -1,0 +1,14 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+data/raw/
+data/cleaned/
+data/model/
+data/logs/
+*.log
+.env
+config.yaml
+.venv/

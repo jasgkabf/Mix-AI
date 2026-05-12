@@ -1,0 +1,8 @@
+[project]
+name = "mix-trainer"
+version = "1.0.0"
+description = "MIX😌混合聊天微模型 - 基于Transformer Decoder-only的真实AI训练框架"
+requires-python = ">=3.8"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

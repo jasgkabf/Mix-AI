@@ -1,0 +1,27 @@
+# MIX😌 Trainer 配置文件
+# API配置 - 用于生成训练数据
+api:
+  name: ""             # API提供商名称 (如 DeepSeek, OpenAI, Qwen)
+  baseUrl: ""          # API基础地址 (如 https://api.deepseek.com/v1)
+  apiKey: ""           # API密钥
+  model: ""            # 模型名称 (如 deepseek-chat)
+
+# 训练配置 - 真实Transformer模型训练参数
+training:
+  modelSize: "small"   # 模型大小: tiny(~2M)/small(~10M)/medium(~50M)
+  blockSize: 256       # 上下文窗口长度
+  batchSize: 8         # 训练批量大小
+  epochs: 50           # 训练轮次
+  learningRate: 0.0003 # 学习率
+  weightDecay: 0.1     # 权重衰减
+  dropout: 0.1         # Dropout比率
+  gradClip: 1.0        # 梯度裁剪
+  logInterval: 5       # 日志打印间隔
+  loopInterval: 300    # 闭环循环间隔(秒)
+
+# 微模型身份配置
+model:
+  name: "MIX😌混合聊天微模型"
+  shortName: "MIX😌"
+  personality: "友好、耐心、幽默、专业"
+  description: "多场景文本问答、日常聊天、智能互动专属AI微模型"
