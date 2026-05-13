@@ -15,7 +15,7 @@ from typing import List, Dict, Optional
 DATA_SPEC = {
     "greeting": {
         "label": "问候类",
-        "per_call": 30,
+        "per_call": 10,
         "total_target": 150,
         "sub_categories": [
             "基础问候(你好/嗨/哈喽)",
@@ -27,7 +27,7 @@ DATA_SPEC = {
     },
     "identity": {
         "label": "身份认知类",
-        "per_call": 30,
+        "per_call": 10,
         "total_target": 150,
         "sub_categories": [
             "名称记忆(你叫什么/你的名字/你叫啥)",
@@ -39,7 +39,7 @@ DATA_SPEC = {
     },
     "daily_chat": {
         "label": "日常聊天类",
-        "per_call": 30,
+        "per_call": 10,
         "total_target": 200,
         "sub_categories": [
             "天气季节(今天好热/最近总下雨/冬天好冷)",
@@ -53,7 +53,7 @@ DATA_SPEC = {
     },
     "general_qa": {
         "label": "通用问答类",
-        "per_call": 30,
+        "per_call": 10,
         "total_target": 200,
         "sub_categories": [
             "科学知识(光速是多少/地球多大/水为什么沸腾)",
@@ -139,7 +139,7 @@ class DataGenerator:
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": 4096,
+            "max_tokens": 8192,
         }
 
         for attempt in range(max_retries):
@@ -154,14 +154,83 @@ class DataGenerator:
 
         return None
 
-    def _parse_response(self, raw: str, category: str) -> List[Dict]:
+    def _repair_json(self, raw: str) -> Optional[str]:
+        import re
+        json_match = re.search(r'\[[\s\S]*', raw)
+        if not json_match:
+            return None
+        raw = json_match.group(0)
+
         try:
-            import re
+            json.loads(raw)
+            return raw
+        except json.JSONDecodeError:
+            pass
+
+        complete_objects = []
+        obj_pattern = re.compile(r'\{\s*"user"\s*:\s*"', re.DOTALL)
+        pos = 0
+        while pos < len(raw):
+            m = obj_pattern.search(raw, pos)
+            if not m:
+                break
+            obj_start = m.start()
+            depth = 0
+            in_str = False
+            escape = False
+            i = obj_start
+            while i < len(raw):
+                ch = raw[i]
+                if escape:
+                    escape = False
+                    i += 1
+                    continue
+                if ch == '\\' and in_str:
+                    escape = True
+                    i += 1
+                    continue
+                if ch == '"' and not escape:
+                    in_str = not in_str
+                elif not in_str:
+                    if ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+                        if depth == 0:
+                            candidate = raw[obj_start:i + 1]
+                            try:
+                                obj = json.loads(candidate)
+                                if isinstance(obj, dict) and obj.get("user") and obj.get("assistant"):
+                                    complete_objects.append(candidate)
+                            except json.JSONDecodeError:
+                                pass
+                            pos = i + 1
+                            break
+                i += 1
+            else:
+                pos = i
+
+        if complete_objects:
+            return "[" + ",".join(complete_objects) + "]"
+        return None
+
+    def _parse_response(self, raw: str, category: str) -> List[Dict]:
+        import re
+        try:
             json_match = re.search(r'\[[\s\S]*\]', raw)
             if json_match:
                 raw = json_match.group(0)
 
-            parsed = json.loads(raw)
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                repaired = self._repair_json(raw)
+                if repaired:
+                    parsed = json.loads(repaired)
+                else:
+                    print(f"  JSON解析失败且修复无效，跳过此批")
+                    return []
+
             if not isinstance(parsed, list):
                 return []
 
