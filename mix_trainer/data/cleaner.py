@@ -28,7 +28,7 @@ class DataCleaner:
         cleaned = self._remove_invalid(cleaned)
         print(f"  有效性过滤后: {len(cleaned)} 条")
 
-        cleaned = self._truncate_long_replies(cleaned, max_len=100)
+        cleaned = self._truncate_long_replies(cleaned, max_len=50)
         print(f"  长回复截断后: {len(cleaned)} 条")
 
         cleaned = self._normalize_content(cleaned)
@@ -194,8 +194,8 @@ class DataCleaner:
 
         if name_rate > 60:
             print(f"  ⚠️ 名称出现率过高({name_rate:.0f}%)! 数据可能过于雷同，模型会只会自我介绍")
-        if avg_len > 80:
-            print(f"  ⚠️ 回复平均长度过长({avg_len:.0f}字)! 建议控制在50字以内")
+        if avg_len > 50:
+            print(f"  ⚠️ 回复平均长度过长({avg_len:.0f}字)! 建议控制在30字以内")
 
     def _normalize_content(self, data: List[Dict]) -> List[Dict]:
         for item in data:

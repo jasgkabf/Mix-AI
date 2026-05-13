@@ -55,7 +55,7 @@ class MixChatEngine:
     def chat(
         self,
         user_input: str,
-        max_new_tokens: int = 200,
+        max_new_tokens: int = 60,
         temperature: float = 0.8,
         top_k: int = 40,
         top_p: float = 0.9,

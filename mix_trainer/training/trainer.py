@@ -61,7 +61,6 @@ class MixTrainer:
         val_ratio: float = 0.2,
         log_interval: int = 5,
         eval_interval: int = 1,
-        save_interval: int = 5,
     ):
         self.data_dir = data_dir
         self.output_dir = output_dir
@@ -82,7 +81,6 @@ class MixTrainer:
         self.val_ratio = val_ratio
         self.log_interval = log_interval
         self.eval_interval = eval_interval
-        self.save_interval = save_interval
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = None
@@ -327,9 +325,6 @@ class MixTrainer:
             else:
                 self.epochs_no_improve += 1
                 print(f"  ⏳ 验证Loss未改善 ({self.epochs_no_improve}/{self.early_stop_patience}, 阈值: {self.early_stop_min_delta})")
-
-            if (epoch + 1) % self.save_interval == 0:
-                self._save_model(f"model_epoch_{epoch+1}.pt", epoch, avg_train_loss, avg_val_loss)
 
             if self.epochs_no_improve >= self.early_stop_patience:
                 print(f"\n  🛑 早停触发！验证Loss连续{self.early_stop_patience}轮未改善(阈值>{self.early_stop_min_delta})")
