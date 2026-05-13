@@ -1,7 +1,7 @@
 """
 MIX😌 自监督预训练器 - Next Token Prediction
 基于PyTorch + Transformer Decoder-only
-支持CPU/GPU训练，支持DeepSpeed分布式训练
+支持CPU/GPU训练，含早停/学习率自适应/标签平滑
 """
 
 import os
@@ -11,8 +11,9 @@ import json
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from mix_trainer.model.gpt import MixGPT
 from mix_trainer.model.config import ModelConfig, ModelSize
@@ -27,12 +28,16 @@ class MixTrainer:
         output_dir: str = "data/model",
         model_size: str = "small",
         block_size: int = 256,
-        batch_size: int = 8,
-        epochs: int = 50,
-        learning_rate: float = 3e-4,
-        weight_decay: float = 0.1,
-        dropout: float = 0.1,
-        grad_clip: float = 1.0,
+        batch_size: int = 16,
+        epochs: int = 8,
+        learning_rate: float = 5e-4,
+        weight_decay: float = 0.05,
+        dropout: float = 0.2,
+        grad_clip: float = 0.5,
+        label_smoothing: float = 0.1,
+        early_stop_patience: int = 3,
+        lr_patience: int = 2,
+        lr_factor: float = 0.5,
         log_interval: int = 5,
         eval_interval: int = 1,
         save_interval: int = 5,
@@ -47,6 +52,10 @@ class MixTrainer:
         self.weight_decay = weight_decay
         self.dropout = dropout
         self.grad_clip = grad_clip
+        self.label_smoothing = label_smoothing
+        self.early_stop_patience = early_stop_patience
+        self.lr_patience = lr_patience
+        self.lr_factor = lr_factor
         self.log_interval = log_interval
         self.eval_interval = eval_interval
         self.save_interval = save_interval
@@ -57,6 +66,7 @@ class MixTrainer:
         self.optimizer = None
         self.scheduler = None
         self.best_val_loss = float("inf")
+        self.epochs_no_improve = 0
         self.train_history = []
 
         os.makedirs(output_dir, exist_ok=True)
@@ -115,10 +125,17 @@ class MixTrainer:
             betas=(0.9, 0.95),
             device_type=self.device.type,
         )
-        self.scheduler = CosineAnnealingLR(
-            self.optimizer, T_max=self.epochs, eta_min=1e-5
+        self.scheduler = ReduceLROnPlateau(
+            self.optimizer,
+            mode="min",
+            factor=self.lr_factor,
+            patience=self.lr_patience,
+            min_lr=1e-6,
+            verbose=True,
         )
-        print(f"  优化器: AdamW | 学习率: {self.learning_rate} | 调度: CosineAnnealing")
+        print(f"  优化器: AdamW | 学习率: {self.learning_rate} | 调度: ReduceLROnPlateau")
+        print(f"  LR patience: {self.lr_patience} | LR factor: {self.lr_factor}")
+        print(f"  早停patience: {self.early_stop_patience} | 标签平滑: {self.label_smoothing}")
         print()
 
         config_path = os.path.join(self.output_dir, "model_config.json")
@@ -128,12 +145,31 @@ class MixTrainer:
         print("[4/4] 训练准备完成！")
         print(f"  训练轮次: {self.epochs} | 批量大小: {self.batch_size}")
         print(f"  梯度裁剪: {self.grad_clip} | 权重衰减: {self.weight_decay}")
+        print(f"  Dropout: {self.dropout} | 标签平滑: {self.label_smoothing}")
         print("-" * 60)
+
+    def _compute_loss(self, logits, targets):
+        if self.label_smoothing > 0:
+            n_classes = logits.size(-1)
+            loss = F.cross_entropy(
+                logits.view(-1, n_classes),
+                targets.view(-1),
+                ignore_index=-1,
+                label_smoothing=self.label_smoothing,
+            )
+        else:
+            loss = F.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                targets.view(-1),
+                ignore_index=-1,
+            )
+        return loss
 
     def train(self):
         self.setup()
 
         start_time = time.time()
+        stopped_early = False
 
         for epoch in range(self.epochs):
             epoch_start = time.time()
@@ -145,7 +181,8 @@ class MixTrainer:
                 x = x.to(self.device)
                 y = y.to(self.device)
 
-                logits, loss = self.model(x, y)
+                logits, _ = self.model(x, y)
+                loss = self._compute_loss(logits, y)
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -166,19 +203,22 @@ class MixTrainer:
                         f"耗时: {elapsed:.0f}s"
                     )
 
-            self.scheduler.step()
-
             avg_train_loss = total_loss / max(batch_count, 1)
 
             avg_val_loss = avg_train_loss
             if self.val_loader is not None and (epoch + 1) % self.eval_interval == 0:
                 avg_val_loss = self._evaluate()
 
+            self.scheduler.step(avg_val_loss)
+
             epoch_time = time.time() - epoch_start
+            gap = avg_train_loss - avg_val_loss
             self.train_history.append({
                 "epoch": epoch + 1,
                 "train_loss": avg_train_loss,
                 "val_loss": avg_val_loss,
+                "gap": gap,
+                "lr": self.optimizer.param_groups[0]["lr"],
                 "time": epoch_time,
             })
 
@@ -186,16 +226,26 @@ class MixTrainer:
                 f"  ✅ Epoch {epoch+1} 完成 | "
                 f"训练Loss: {avg_train_loss:.4f} | "
                 f"验证Loss: {avg_val_loss:.4f} | "
+                f"差距: {gap:+.4f} | "
                 f"耗时: {epoch_time:.0f}s"
             )
 
             if avg_val_loss < self.best_val_loss:
                 self.best_val_loss = avg_val_loss
+                self.epochs_no_improve = 0
                 self._save_model("model_best.pt", epoch, avg_train_loss, avg_val_loss)
                 print(f"  💾 最佳模型已保存 (val_loss: {self.best_val_loss:.4f})")
+            else:
+                self.epochs_no_improve += 1
+                print(f"  ⏳ 验证Loss未改善 ({self.epochs_no_improve}/{self.early_stop_patience})")
 
             if (epoch + 1) % self.save_interval == 0:
                 self._save_model(f"model_epoch_{epoch+1}.pt", epoch, avg_train_loss, avg_val_loss)
+
+            if self.epochs_no_improve >= self.early_stop_patience:
+                print(f"\n  🛑 早停触发！验证Loss连续{self.early_stop_patience}轮未改善")
+                stopped_early = True
+                break
 
         self._save_model("model_final.pt", self.epochs, avg_train_loss, avg_val_loss)
 
@@ -206,12 +256,14 @@ class MixTrainer:
         total_time = time.time() - start_time
         print()
         print("=" * 60)
-        print(f"  🎉 训练完成！")
+        print(f"  🎉 训练完成！{'(早停)' if stopped_early else ''}")
         print(f"  总耗时: {total_time/60:.1f}分钟")
         print(f"  最佳验证Loss: {self.best_val_loss:.4f}")
+        perplexity = math.exp(self.best_val_loss) if self.best_val_loss < 20 else float("inf")
+        print(f"  最佳困惑度(Perplexity): {perplexity:.1f}")
         print(f"  模型参数: {self.model.get_num_params()/1e6:.2f}M")
         print(f"  模型保存: {self.output_dir}")
-        print(f"  运行聊天: python -m mix_trainer.cli.chat --model_dir {self.output_dir}")
+        print(f"  运行聊天: python -m mix_trainer chat")
         print("=" * 60)
 
     def _evaluate(self) -> float:
@@ -223,7 +275,8 @@ class MixTrainer:
             for x, y in self.val_loader:
                 x = x.to(self.device)
                 y = y.to(self.device)
-                _, loss = self.model(x, y)
+                logits, _ = self.model(x, y)
+                loss = self._compute_loss(logits, y)
                 total_loss += loss.item()
                 batch_count += 1
 
@@ -239,4 +292,5 @@ class MixTrainer:
             "val_loss": val_loss,
             "model_config": self.model.config.to_dict(),
             "best_val_loss": self.best_val_loss,
+            "label_smoothing": self.label_smoothing,
         }, filepath)

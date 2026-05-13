@@ -8,16 +8,21 @@ api:
 
 # 训练配置 - 真实Transformer模型训练参数
 training:
-  modelSize: "small"   # 模型大小: tiny(~2M)/small(~10M)/medium(~50M)
-  blockSize: 256       # 上下文窗口长度
-  batchSize: 8         # 训练批量大小
-  epochs: 50           # 训练轮次
-  learningRate: 0.0003 # 学习率
-  weightDecay: 0.1     # 权重衰减
-  dropout: 0.1         # Dropout比率
-  gradClip: 1.0        # 梯度裁剪
-  logInterval: 5       # 日志打印间隔
-  loopInterval: 300    # 闭环循环间隔(秒)
+  modelSize: "small"       # 模型大小: tiny(~2M)/small(~10M)/medium(~50M)
+  blockSize: 256           # 上下文窗口长度
+  batchSize: 16            # 训练批量大小
+  epochs: 8                # 训练轮次
+  learningRate: 0.0005     # 学习率 (5e-4)
+  weightDecay: 0.05        # 权重衰减
+  dropout: 0.2             # Dropout比率
+  gradClip: 0.5            # 梯度裁剪
+  labelSmoothing: 0.1      # 标签平滑
+  earlyStopPatience: 3     # 早停patience (验证Loss连续N轮不降则停止)
+  lrPatience: 2            # 学习率调度patience (验证Loss连续N轮不降则降LR)
+  lrFactor: 0.5            # 学习率衰减因子
+  logInterval: 5           # 日志打印间隔
+  loopInterval: 300        # 闭环循环间隔(秒)
+  maxLoops: 5              # 最大闭环轮数 (0=无限)
 
 # 微模型身份配置
 model:

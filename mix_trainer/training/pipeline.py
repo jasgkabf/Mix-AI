@@ -1,6 +1,7 @@
 """
 MIX😌 全自动闭环训练Pipeline
 生成数据 → 清洗 → 训练 → API测试 → 循环强化
+支持增量数据策略，每轮生成不同子类避免重复
 """
 
 import os
@@ -56,12 +57,16 @@ class TrainingPipeline:
             output_dir="data/model",
             model_size=training.get("modelSize", "small"),
             block_size=training.get("blockSize", 256),
-            batch_size=training.get("batchSize", 8),
-            epochs=training.get("epochs", 50),
-            learning_rate=training.get("learningRate", 3e-4),
-            weight_decay=training.get("weightDecay", 0.1),
-            dropout=training.get("dropout", 0.1),
-            grad_clip=training.get("gradClip", 1.0),
+            batch_size=training.get("batchSize", 16),
+            epochs=training.get("epochs", 8),
+            learning_rate=training.get("learningRate", 5e-4),
+            weight_decay=training.get("weightDecay", 0.05),
+            dropout=training.get("dropout", 0.2),
+            grad_clip=training.get("gradClip", 0.5),
+            label_smoothing=training.get("labelSmoothing", 0.1),
+            early_stop_patience=training.get("earlyStopPatience", 3),
+            lr_patience=training.get("lrPatience", 2),
+            lr_factor=training.get("lrFactor", 0.5),
             log_interval=training.get("logInterval", 5),
         )
 
@@ -146,9 +151,12 @@ class TrainingPipeline:
         self.running = True
         loop_count = 0
 
+        if max_loops == 0:
+            max_loops = self.config.get("training", {}).get("maxLoops", 5)
+
         print("\n" + "=" * 60)
         print("  🚀 MIX😌 全自动闭环训练已启动")
-        print(f"  循环间隔: {interval}秒 | 最大循环: {'无限' if max_loops == 0 else max_loops}")
+        print(f"  循环间隔: {interval}秒 | 最大循环: {max_loops}轮")
         print("  按 Ctrl+C 安全停止，停止后可运行 mix chat 聊天")
         print("=" * 60 + "\n")
 

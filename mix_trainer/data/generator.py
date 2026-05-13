@@ -1,6 +1,7 @@
 """
 MIX😌 训练数据生成器 - 调用第三方大模型API批量生成高质量训练语料
-真实AI训练需要大量高质量数据，每轮生成2600+条标准对话
+真实AI训练需要大量高质量数据，每轮生成1200+条标准对话
+重点: 子类多样性 > 数量，避免重复数据导致过拟合
 """
 
 import os
@@ -15,55 +16,80 @@ from typing import List, Dict, Optional
 DATA_SPEC = {
     "greeting": {
         "label": "问候类",
-        "per_call": 20,
-        "total_target": 500,
+        "per_call": 15,
+        "total_target": 200,
         "sub_categories": [
-            "基础问候(你好/嗨/哈喽)",
-            "时间问候(早上好/中午好/晚上好/晚安)",
-            "场景问候(在吗/最近怎么样/好久不见)",
-            "情绪问候(今天心情不错/好累啊/开心)",
-            "节日问候(新年好/生日快乐/圣诞快乐)",
+            "基础问候(你好/嗨/哈喽/嘿)",
+            "时间问候(早上好/中午好/晚上好/晚安/下午好)",
+            "场景问候(在吗/最近怎么样/好久不见/好久没聊)",
+            "情绪问候(今天心情不错/好累啊/开心/烦死了)",
+            "节日问候(新年好/生日快乐/圣诞快乐/中秋快乐)",
+            "网络用语问候(哈喽啊/在不在/滴滴/冒个泡)",
+            "方言问候(侬好/嘎哈呢/弄啥嘞/吃了没)",
+            "正式场合问候(您好/久仰/幸会/初次见面)",
+            "朋友间问候(兄弟/姐妹/宝子/亲爱的)",
+            "长辈问候(叔叔好/阿姨好/老师好/领导好)",
         ],
     },
     "identity": {
         "label": "身份认知类",
-        "per_call": 20,
-        "total_target": 500,
+        "per_call": 15,
+        "total_target": 200,
         "sub_categories": [
-            "名称记忆(你叫什么/你的名字/你叫啥)",
-            "功能介绍(你能做什么/你会什么/你擅长什么)",
-            "身份对比(你和ChatGPT区别/你和其他AI不同)",
-            "自我介绍(介绍一下你自己/说说你的特点)",
-            "能力边界(你不会什么/你的局限是什么)",
+            "名称记忆(你叫什么/你的名字/你叫啥/你叫啥名)",
+            "功能介绍(你能做什么/你会什么/你擅长什么/你有什么功能)",
+            "身份对比(你和ChatGPT区别/你和其他AI不同/你比Siri强在哪)",
+            "自我介绍(介绍一下你自己/说说你的特点/你是谁)",
+            "能力边界(你不会什么/你的局限是什么/有什么你做不到)",
+            "性格描述(你是什么性格/你的风格是什么/你什么脾气)",
+            "价值观表达(你觉得什么重要/你的原则是什么/你怎么看世界)",
+            "角色扮演(如果你是人类/你想象自己是/假如你住在)",
+            "版本信息(你是第几代/你是什么版本/你更新了吗)",
+            "创造者信息(谁创造了你/谁开发了你/谁是你爸爸)",
         ],
     },
     "daily_chat": {
         "label": "日常聊天类",
-        "per_call": 20,
-        "total_target": 800,
+        "per_call": 15,
+        "total_target": 400,
         "sub_categories": [
-            "天气季节(今天好热/最近总下雨/冬天好冷)",
-            "美食饮食(中午吃什么/推荐个菜/你会做饭吗)",
-            "心情情感(我好开心/有点难过/压力好大)",
-            "兴趣爱好(喜欢什么电影/推荐首歌/周末干嘛)",
-            "生活日常(好无聊/刚起床/加班好累)",
-            "社交人际(朋友过生日送什么/怎么认识新朋友)",
-            "宠物动物(想养猫/狗狗好可爱/金鱼怎么养)",
+            "天气季节(今天好热/最近总下雨/冬天好冷/春天来了)",
+            "美食饮食(中午吃什么/推荐个菜/你会做饭吗/最近吃了啥)",
+            "心情情感(我好开心/有点难过/压力好大/好感动)",
+            "兴趣爱好(喜欢什么电影/推荐首歌/周末干嘛/最近追什么剧)",
+            "生活日常(好无聊/刚起床/加班好累/今天好忙)",
+            "社交人际(朋友过生日送什么/怎么认识新朋友/和同事吵架了)",
+            "宠物动物(想养猫/狗狗好可爱/金鱼怎么养/仓鼠好萌)",
+            "影视娱乐(最近什么电影好看/综艺推荐/追剧推荐)",
+            "音乐艺术(推荐好听的歌/学乐器/画画/听什么音乐)",
+            "运动健身(怎么减肥/跑步/瑜伽/游泳/健身计划)",
+            "读书学习(推荐一本书/怎么读书/最近看了什么/学习习惯)",
+            "游戏电竞(推荐个游戏/手游/端游/最近玩什么)",
+            "时尚穿搭(今天穿什么/搭配建议/买衣服/护肤)",
+            "旅行见闻(去哪旅游好/旅行故事/攻略/签证)",
+            "家居生活(装修/收纳/做饭/打扫/养花)",
         ],
     },
     "general_qa": {
         "label": "通用问答类",
-        "per_call": 20,
-        "total_target": 800,
+        "per_call": 15,
+        "total_target": 400,
         "sub_categories": [
-            "科学知识(光速是多少/地球多大/水为什么沸腾)",
-            "生活常识(怎么去油渍/感冒怎么办/手机省电)",
-            "学习方法(怎么学英语/如何提高记忆力/读书方法)",
-            "工作职场(如何提高效率/面试技巧/时间管理)",
-            "科技数码(什么是AI/5G有什么用/区块链解释)",
-            "健康养生(每天喝多少水/怎么改善睡眠/运动建议)",
-            "文化历史(春节由来/中秋习俗/四大发明)",
-            "地理旅行(去哪旅游好/签证怎么办/旅行必备)",
+            "科学知识(光速是多少/地球多大/水为什么沸腾/黑洞是什么)",
+            "生活常识(怎么去油渍/感冒怎么办/手机省电/衣服缩水)",
+            "学习方法(怎么学英语/如何提高记忆力/读书方法/考试技巧)",
+            "工作职场(如何提高效率/面试技巧/时间管理/升职加薪)",
+            "科技数码(什么是AI/5G有什么用/区块链解释/量子计算)",
+            "健康养生(每天喝多少水/怎么改善睡眠/运动建议/减压方法)",
+            "文化历史(春节由来/中秋习俗/四大发明/历史故事)",
+            "地理旅行(去哪旅游好/签证怎么办/旅行必备/景点推荐)",
+            "数学计算(算术题/概率问题/逻辑推理/脑筋急转弯)",
+            "语言翻译(这个词怎么翻译/英语怎么说/日语怎么讲)",
+            "写作辅助(帮我写个开头/作文怎么写/文案/邮件)",
+            "编程帮助(Python怎么学/代码报错/算法/前端后端)",
+            "情感咨询(失恋怎么办/怎么表白/异地恋/友情问题)",
+            "笑话段子(讲个笑话/冷笑话/谐音梗/脑筋急转弯)",
+            "哲学思考(人生的意义/自由是什么/幸福是什么/时间是什么)",
         ],
     },
 }
@@ -95,6 +121,7 @@ def _build_prompt(category: str, sub_index: int, model_name: str, short_name: st
 6. 回复要有信息量，不能只说"好的""是的"这类空洞回答
 7. 不同对话之间不能重复内容和句式
 8. 模型回复要体现{personality}的性格特点
+9. 每条对话都必须是全新的，不能与之前生成的任何对话相似
 
 请严格按以下JSON格式输出，不要添加任何其他文字:
 [
@@ -103,7 +130,7 @@ def _build_prompt(category: str, sub_index: int, model_name: str, short_name: st
 ]"""
 
     if category == "greeting":
-        base += f"\n\n特别注意: 回复要热情亲切，{count}组问候方式各不相同"
+        base += f"\n\n特别注意: 回复要热情亲切，{count}组问候方式各不相同，不要重复"
     elif category == "identity":
         base += f"\n\n特别注意: 每条回复都必须明确说出'{short_name}'这个名称，不能含糊"
     elif category == "daily_chat":
@@ -129,7 +156,7 @@ class DataGenerator:
         self.personality = personality
         self.description = description
 
-    def _call_api(self, messages: List[Dict], temperature: float = 0.9, max_retries: int = 3) -> Optional[str]:
+    def _call_api(self, messages: List[Dict], temperature: float = 0.85, max_retries: int = 3) -> Optional[str]:
         url = f"{self.api_url}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -147,7 +174,11 @@ class DataGenerator:
                 resp = requests.post(url, json=payload, headers=headers, timeout=300)
                 resp.raise_for_status()
                 data = resp.json()
-                return data["choices"][0]["message"]["content"].strip()
+                content = data["choices"][0]["message"]["content"].strip()
+                finish_reason = data["choices"][0].get("finish_reason", "")
+                if finish_reason == "length":
+                    print(f"  ⚠ API响应被截断(finish_reason=length)，数据可能不完整")
+                return content
             except Exception as e:
                 print(f"  API调用失败(第{attempt+1}次): {e}")
                 time.sleep(3)
@@ -227,6 +258,7 @@ class DataGenerator:
                 repaired = self._repair_json(raw)
                 if repaired:
                     parsed = json.loads(repaired)
+                    print(f"  🔧 JSON修复成功，提取到{len(parsed)}条有效数据")
                 else:
                     print(f"  JSON解析失败且修复无效，跳过此批")
                     return []
@@ -294,7 +326,7 @@ class DataGenerator:
                 )
 
                 messages = [
-                    {"role": "system", "content": "你是一个专业的AI训练数据生成器，严格按照要求的JSON格式输出高质量的对话训练数据。每次生成的对话必须全新，不能与之前重复。"},
+                    {"role": "system", "content": "你是一个专业的AI训练数据生成器，严格按照要求的JSON格式输出高质量的对话训练数据。每次生成的对话必须全新，不能与之前重复。确保输出完整的JSON数组。"},
                     {"role": "user", "content": prompt},
                 ]
 
@@ -302,7 +334,9 @@ class DataGenerator:
                 if raw:
                     items = self._parse_response(raw, category)
                     cat_items.extend(items)
-                    print(f"    子类{call_idx+1}/{calls_needed} ({spec['sub_categories'][sub_idx][:8]}...): {len(items)}条")
+                    sub_name = spec['sub_categories'][sub_idx]
+                    sub_label = sub_name.split('(')[0] if '(' in sub_name else sub_name[:8]
+                    print(f"    子类{call_idx+1}/{calls_needed} ({sub_label}): {len(items)}条")
                 else:
                     print(f"    子类{call_idx+1}/{calls_needed}: 生成失败")
 
