@@ -1,6 +1,6 @@
 """
 MIX😌 训练数据生成器 - 调用第三方大模型API批量生成高质量训练语料
-真实AI训练需要大量高质量数据，每轮生成500+条标准对话
+真实AI训练需要大量高质量数据，每轮生成2600+条标准对话
 """
 
 import os
@@ -15,8 +15,8 @@ from typing import List, Dict, Optional
 DATA_SPEC = {
     "greeting": {
         "label": "问候类",
-        "per_call": 10,
-        "total_target": 150,
+        "per_call": 20,
+        "total_target": 500,
         "sub_categories": [
             "基础问候(你好/嗨/哈喽)",
             "时间问候(早上好/中午好/晚上好/晚安)",
@@ -27,8 +27,8 @@ DATA_SPEC = {
     },
     "identity": {
         "label": "身份认知类",
-        "per_call": 10,
-        "total_target": 150,
+        "per_call": 20,
+        "total_target": 500,
         "sub_categories": [
             "名称记忆(你叫什么/你的名字/你叫啥)",
             "功能介绍(你能做什么/你会什么/你擅长什么)",
@@ -39,8 +39,8 @@ DATA_SPEC = {
     },
     "daily_chat": {
         "label": "日常聊天类",
-        "per_call": 10,
-        "total_target": 200,
+        "per_call": 20,
+        "total_target": 800,
         "sub_categories": [
             "天气季节(今天好热/最近总下雨/冬天好冷)",
             "美食饮食(中午吃什么/推荐个菜/你会做饭吗)",
@@ -53,8 +53,8 @@ DATA_SPEC = {
     },
     "general_qa": {
         "label": "通用问答类",
-        "per_call": 10,
-        "total_target": 200,
+        "per_call": 20,
+        "total_target": 800,
         "sub_categories": [
             "科学知识(光速是多少/地球多大/水为什么沸腾)",
             "生活常识(怎么去油渍/感冒怎么办/手机省电)",
@@ -139,12 +139,12 @@ class DataGenerator:
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": 8192,
+            "max_tokens": 16384,
         }
 
         for attempt in range(max_retries):
             try:
-                resp = requests.post(url, json=payload, headers=headers, timeout=120)
+                resp = requests.post(url, json=payload, headers=headers, timeout=300)
                 resp.raise_for_status()
                 data = resp.json()
                 return data["choices"][0]["message"]["content"].strip()
