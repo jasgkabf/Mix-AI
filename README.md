@@ -95,15 +95,29 @@
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/your-username/mix-trainer.git
-cd mix-trainer
+git clone https://github.com/jasgkabf/Mix-AI.git
+cd Mix-AI
 ```
 
-### 2. 安装依赖
+### 2. 创建虚拟环境并安装依赖
+
+> ⚠️ **Ubuntu 23.04+ / Debian 12+ 用户**：系统禁止直接 `pip install`，必须使用虚拟环境
 
 ```bash
+# 安装 Python venv（如果没有）
+sudo apt update && sudo apt install -y python3-venv python3-full
+
+# 创建虚拟环境
+python3 -m venv venv
+
+# 激活虚拟环境
+source venv/bin/activate
+
+# 安装依赖
 pip install -r requirements.txt
 ```
+
+> 💡 每次打开新终端都需要运行 `source venv/bin/activate` 激活虚拟环境
 
 ### 3. 初始化配置
 
