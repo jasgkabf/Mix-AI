@@ -1,19 +1,22 @@
 """
 MIX😌 训练数据集 - 自监督预训练格式
 Next Token Prediction: 给定前N个token，预测第N+1个token
+含数据增强: 随机token遮蔽(15%)
 """
 
 import os
 import json
+import random
 import torch
 from torch.utils.data import Dataset
 from typing import List, Optional
 
 
 class ConversationDataset(Dataset):
-    def __init__(self, data_dir: str, tokenizer, block_size: int = 256):
+    def __init__(self, data_dir: str, tokenizer, block_size: int = 256, mask_ratio: float = 0.15):
         self.tokenizer = tokenizer
         self.block_size = block_size
+        self.mask_ratio = mask_ratio
         self.examples = []
 
         all_items = self._load_all_data(data_dir)
@@ -51,7 +54,7 @@ class ConversationDataset(Dataset):
 
         self._flatten_and_chunk()
 
-        print(f"构建训练样本: {len(self.examples)} 条 (block_size={block_size})")
+        print(f"构建训练样本: {len(self.examples)} 条 (block_size={block_size}, mask_ratio={mask_ratio})")
 
     def _load_all_data(self, data_dir: str) -> List[dict]:
         all_items = []
@@ -95,4 +98,32 @@ class ConversationDataset(Dataset):
         item = self.examples[idx]
         x = torch.tensor(item[:-1], dtype=torch.long)
         y = torch.tensor(item[1:], dtype=torch.long)
+
+        if self.mask_ratio > 0 and self.training:
+            x = self._apply_masking(x)
+
         return x, y
+
+    def _apply_masking(self, x: torch.Tensor) -> torch.Tensor:
+        mask_token = self.tokenizer.SPECIAL_TOKENS.get("<MASK>", 5)
+        vocab_size = self.tokenizer.vocab_size
+        mask = torch.rand(x.shape) < self.mask_ratio
+        special_mask = torch.zeros(x.shape, dtype=torch.bool)
+        for token_id in self.tokenizer.SPECIAL_TOKENS.values():
+            special_mask |= (x == token_id)
+        mask = mask & ~special_mask
+
+        x_masked = x.clone()
+        masked_indices = mask.nonzero(as_tuple=True)
+
+        for i in range(len(masked_indices[0])):
+            idx = masked_indices[0][i]
+            rand_val = random.random()
+            if rand_val < 0.8:
+                x_masked[idx] = mask_token
+            elif rand_val < 0.9:
+                x_masked[idx] = random.randint(0, vocab_size - 1)
+
+        return x_masked
+
+    training = True

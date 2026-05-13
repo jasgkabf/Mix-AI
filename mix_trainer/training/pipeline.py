@@ -65,8 +65,11 @@ class TrainingPipeline:
             grad_clip=training.get("gradClip", 0.5),
             label_smoothing=training.get("labelSmoothing", 0.1),
             early_stop_patience=training.get("earlyStopPatience", 3),
+            early_stop_min_delta=training.get("earlyStopMinDelta", 0.01),
             lr_patience=training.get("lrPatience", 2),
             lr_factor=training.get("lrFactor", 0.5),
+            warmup_steps=training.get("warmupSteps", 200),
+            val_ratio=training.get("valRatio", 0.2),
             log_interval=training.get("logInterval", 5),
         )
 
@@ -97,7 +100,8 @@ class TrainingPipeline:
             return
 
         print("[2/4] 清洗训练数据...")
-        cleaner = DataCleaner()
+        short_name = self.config.get("model", {}).get("shortName", "MIX😌")
+        cleaner = DataCleaner(short_name=short_name)
         cleaned_data = cleaner.clean(raw_data, "data/cleaned")
         print(f"  清洗后 {len(cleaned_data)} 条合格数据\n")
 

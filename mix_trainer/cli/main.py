@@ -54,8 +54,11 @@ def cmd_init(args):
             "gradClip": 0.5,
             "labelSmoothing": 0.1,
             "earlyStopPatience": 3,
+            "earlyStopMinDelta": 0.01,
             "lrPatience": 2,
             "lrFactor": 0.5,
+            "warmupSteps": 200,
+            "valRatio": 0.2,
             "logInterval": 5,
             "loopInterval": 300,
             "maxLoops": 5,
@@ -182,7 +185,14 @@ def cmd_clean(args):
         print("❌ 没有原始数据，请先运行 mix generate")
         return
 
-    cleaner = DataCleaner()
+    short_name = "MIX😌"
+    try:
+        config = load_config()
+        short_name = config.get("model", {}).get("shortName", "MIX😌")
+    except Exception:
+        pass
+
+    cleaner = DataCleaner(short_name=short_name)
     all_raw = []
     for filepath in sorted(glob.glob(os.path.join(raw_dir, "*.json"))):
         try:
@@ -216,8 +226,11 @@ def cmd_train(args):
         grad_clip=training.get("gradClip", 0.5),
         label_smoothing=training.get("labelSmoothing", 0.1),
         early_stop_patience=training.get("earlyStopPatience", 3),
+        early_stop_min_delta=training.get("earlyStopMinDelta", 0.01),
         lr_patience=training.get("lrPatience", 2),
         lr_factor=training.get("lrFactor", 0.5),
+        warmup_steps=training.get("warmupSteps", 200),
+        val_ratio=training.get("valRatio", 0.2),
     )
     trainer.train()
 

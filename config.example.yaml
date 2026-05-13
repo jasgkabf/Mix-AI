@@ -18,8 +18,11 @@ training:
   gradClip: 0.5            # 梯度裁剪
   labelSmoothing: 0.1      # 标签平滑
   earlyStopPatience: 3     # 早停patience (验证Loss连续N轮不降则停止)
+  earlyStopMinDelta: 0.01  # 早停最小改善阈值 (Loss降幅<0.01不算改善)
   lrPatience: 2            # 学习率调度patience (验证Loss连续N轮不降则降LR)
   lrFactor: 0.5            # 学习率衰减因子
+  warmupSteps: 200         # 学习率预热步数 (前200步LR从0缓慢升到目标值)
+  valRatio: 0.2            # 验证集比例 (20%)
   logInterval: 5           # 日志打印间隔
   loopInterval: 300        # 闭环循环间隔(秒)
   maxLoops: 5              # 最大闭环轮数 (0=无限)

@@ -1,7 +1,7 @@
 """
 MIX😌 自监督预训练器 - Next Token Prediction
 基于PyTorch + Transformer Decoder-only
-支持CPU/GPU训练，含早停/学习率自适应/标签平滑
+含: 早停/学习率预热+自适应/标签平滑/梯度监控/数据增强
 """
 
 import os
@@ -13,12 +13,30 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, random_split
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR
 
 from mix_trainer.model.gpt import MixGPT
 from mix_trainer.model.config import ModelConfig, ModelSize
 from mix_trainer.data.tokenizer import BPETokenizer
 from mix_trainer.data.dataset import ConversationDataset
+
+
+class WarmupScheduler:
+    def __init__(self, optimizer, warmup_steps: int, base_lr: float):
+        self.optimizer = optimizer
+        self.warmup_steps = max(warmup_steps, 1)
+        self.base_lr = base_lr
+        self.current_step = 0
+
+    def step(self):
+        self.current_step += 1
+        if self.current_step <= self.warmup_steps:
+            scale = self.current_step / self.warmup_steps
+            for pg in self.optimizer.param_groups:
+                pg["lr"] = self.base_lr * scale
+
+    def is_warmup_done(self) -> bool:
+        return self.current_step >= self.warmup_steps
 
 
 class MixTrainer:
@@ -36,8 +54,11 @@ class MixTrainer:
         grad_clip: float = 0.5,
         label_smoothing: float = 0.1,
         early_stop_patience: int = 3,
+        early_stop_min_delta: float = 0.01,
         lr_patience: int = 2,
         lr_factor: float = 0.5,
+        warmup_steps: int = 200,
+        val_ratio: float = 0.2,
         log_interval: int = 5,
         eval_interval: int = 1,
         save_interval: int = 5,
@@ -54,8 +75,11 @@ class MixTrainer:
         self.grad_clip = grad_clip
         self.label_smoothing = label_smoothing
         self.early_stop_patience = early_stop_patience
+        self.early_stop_min_delta = early_stop_min_delta
         self.lr_patience = lr_patience
         self.lr_factor = lr_factor
+        self.warmup_steps = warmup_steps
+        self.val_ratio = val_ratio
         self.log_interval = log_interval
         self.eval_interval = eval_interval
         self.save_interval = save_interval
@@ -65,9 +89,11 @@ class MixTrainer:
         self.tokenizer = None
         self.optimizer = None
         self.scheduler = None
+        self.warmup_scheduler = None
         self.best_val_loss = float("inf")
         self.epochs_no_improve = 0
         self.train_history = []
+        self.global_step = 0
 
         os.makedirs(output_dir, exist_ok=True)
 
@@ -89,7 +115,7 @@ class MixTrainer:
             print("❌ 没有训练数据！请先运行 mix generate 和 mix clean")
             sys.exit(1)
 
-        train_size = int(0.9 * len(dataset))
+        train_size = int((1 - self.val_ratio) * len(dataset))
         val_size = len(dataset) - train_size
         train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
@@ -102,7 +128,7 @@ class MixTrainer:
             else None
         )
 
-        print(f"  训练集: {train_size} | 验证集: {val_size}")
+        print(f"  训练集: {train_size} | 验证集: {val_size} (比例: {1-self.val_ratio:.0%}/{self.val_ratio:.0%})")
         print()
 
         print("[2/4] 初始化GPT模型...")
@@ -113,6 +139,8 @@ class MixTrainer:
         self.model = MixGPT(config).to(self.device)
         n_params = self.model.get_num_params()
         print(f"  模型参数量: {n_params/1e6:.2f}M")
+
+        self._check_init_weights()
         print()
 
         tokenizer_path = os.path.join(self.output_dir, "tokenizer.json")
@@ -125,6 +153,9 @@ class MixTrainer:
             betas=(0.9, 0.95),
             device_type=self.device.type,
         )
+        self.warmup_scheduler = WarmupScheduler(
+            self.optimizer, self.warmup_steps, self.learning_rate
+        )
         self.scheduler = ReduceLROnPlateau(
             self.optimizer,
             mode="min",
@@ -133,9 +164,11 @@ class MixTrainer:
             min_lr=1e-6,
             verbose=True,
         )
-        print(f"  优化器: AdamW | 学习率: {self.learning_rate} | 调度: ReduceLROnPlateau")
+        print(f"  优化器: AdamW | 学习率: {self.learning_rate}")
+        print(f"  预热步数: {self.warmup_steps} | 调度: Warmup → ReduceLROnPlateau")
         print(f"  LR patience: {self.lr_patience} | LR factor: {self.lr_factor}")
-        print(f"  早停patience: {self.early_stop_patience} | 标签平滑: {self.label_smoothing}")
+        print(f"  早停patience: {self.early_stop_patience} | 最小改善: {self.early_stop_min_delta}")
+        print(f"  标签平滑: {self.label_smoothing} | 验证集比例: {self.val_ratio:.0%}")
         print()
 
         config_path = os.path.join(self.output_dir, "model_config.json")
@@ -147,6 +180,22 @@ class MixTrainer:
         print(f"  梯度裁剪: {self.grad_clip} | 权重衰减: {self.weight_decay}")
         print(f"  Dropout: {self.dropout} | 标签平滑: {self.label_smoothing}")
         print("-" * 60)
+
+    def _check_init_weights(self):
+        all_params = []
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                all_params.append(param.data)
+        if not all_params:
+            return
+        all_weights = torch.cat([p.flatten() for p in all_params])
+        mean = all_weights.mean().item()
+        std = all_weights.std().item()
+        has_nan = torch.isnan(all_weights).any().item()
+        has_inf = torch.isinf(all_weights).any().item()
+        print(f"  初始权重检查: 均值={mean:.6f}, 标准差={std:.6f}, NaN={has_nan}, Inf={has_inf}")
+        if has_nan or has_inf:
+            print("  ⚠️ 初始权重异常！训练可能无法正常进行")
 
     def _compute_loss(self, logits, targets):
         if self.label_smoothing > 0:
@@ -165,6 +214,26 @@ class MixTrainer:
             )
         return loss
 
+    def _monitor_gradients(self):
+        total_norm = 0.0
+        nan_count = 0
+        for p in self.model.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2).item()
+                total_norm += param_norm ** 2
+                if math.isnan(param_norm) or math.isinf(param_norm):
+                    nan_count += 1
+        total_norm = total_norm ** 0.5
+
+        if total_norm > 10.0:
+            print(f"  ⚠️ 梯度爆炸! 梯度范数={total_norm:.2f} (>{10.0})")
+        elif total_norm < 1e-7:
+            print(f"  ⚠️ 梯度消失! 梯度范数={total_norm:.2e} (<1e-7)")
+        if nan_count > 0:
+            print(f"  ❌ 发现{nan_count}个NaN/Inf梯度!")
+
+        return total_norm
+
     def train(self):
         self.setup()
 
@@ -176,6 +245,7 @@ class MixTrainer:
             self.model.train()
             total_loss = 0.0
             batch_count = 0
+            epoch_grad_norms = []
 
             for batch_idx, (x, y) in enumerate(self.train_loader):
                 x = x.to(self.device)
@@ -186,8 +256,21 @@ class MixTrainer:
 
                 self.optimizer.zero_grad()
                 loss.backward()
+
+                if not self.warmup_scheduler.is_warmup_done():
+                    self.warmup_scheduler.step()
+                else:
+                    if self.warmup_scheduler.current_step == self.warmup_steps:
+                        print(f"  🔥 学习率预热完成! LR={self.learning_rate}")
+
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+
+                if (batch_idx + 1) % 100 == 0:
+                    grad_norm = self._monitor_gradients()
+                    epoch_grad_norms.append(grad_norm)
+
                 self.optimizer.step()
+                self.global_step += 1
 
                 total_loss += loss.item()
                 batch_count += 1
@@ -196,10 +279,11 @@ class MixTrainer:
                     avg_loss = total_loss / batch_count
                     elapsed = time.time() - start_time
                     lr = self.optimizer.param_groups[0]["lr"]
+                    warmup_tag = " [预热]" if not self.warmup_scheduler.is_warmup_done() else ""
                     print(
                         f"  Epoch {epoch+1}/{self.epochs} | "
                         f"Batch {batch_idx+1}/{len(self.train_loader)} | "
-                        f"Loss: {avg_loss:.4f} | LR: {lr:.6f} | "
+                        f"Loss: {avg_loss:.4f} | LR: {lr:.6f}{warmup_tag} | "
                         f"耗时: {elapsed:.0f}s"
                     )
 
@@ -209,41 +293,46 @@ class MixTrainer:
             if self.val_loader is not None and (epoch + 1) % self.eval_interval == 0:
                 avg_val_loss = self._evaluate()
 
-            self.scheduler.step(avg_val_loss)
+            if self.warmup_scheduler.is_warmup_done():
+                self.scheduler.step(avg_val_loss)
 
             epoch_time = time.time() - epoch_start
             gap = avg_train_loss - avg_val_loss
+            avg_grad = sum(epoch_grad_norms) / max(len(epoch_grad_norms), 1) if epoch_grad_norms else 0
+
             self.train_history.append({
                 "epoch": epoch + 1,
                 "train_loss": avg_train_loss,
                 "val_loss": avg_val_loss,
                 "gap": gap,
                 "lr": self.optimizer.param_groups[0]["lr"],
+                "avg_grad_norm": avg_grad,
                 "time": epoch_time,
             })
 
+            grad_info = f" | 梯度范数: {avg_grad:.2f}" if avg_grad > 0 else ""
             print(
                 f"  ✅ Epoch {epoch+1} 完成 | "
                 f"训练Loss: {avg_train_loss:.4f} | "
                 f"验证Loss: {avg_val_loss:.4f} | "
-                f"差距: {gap:+.4f} | "
+                f"差距: {gap:+.4f}{grad_info} | "
                 f"耗时: {epoch_time:.0f}s"
             )
 
-            if avg_val_loss < self.best_val_loss:
+            if avg_val_loss < self.best_val_loss - self.early_stop_min_delta:
                 self.best_val_loss = avg_val_loss
                 self.epochs_no_improve = 0
                 self._save_model("model_best.pt", epoch, avg_train_loss, avg_val_loss)
                 print(f"  💾 最佳模型已保存 (val_loss: {self.best_val_loss:.4f})")
             else:
                 self.epochs_no_improve += 1
-                print(f"  ⏳ 验证Loss未改善 ({self.epochs_no_improve}/{self.early_stop_patience})")
+                print(f"  ⏳ 验证Loss未改善 ({self.epochs_no_improve}/{self.early_stop_patience}, 阈值: {self.early_stop_min_delta})")
 
             if (epoch + 1) % self.save_interval == 0:
                 self._save_model(f"model_epoch_{epoch+1}.pt", epoch, avg_train_loss, avg_val_loss)
 
             if self.epochs_no_improve >= self.early_stop_patience:
-                print(f"\n  🛑 早停触发！验证Loss连续{self.early_stop_patience}轮未改善")
+                print(f"\n  🛑 早停触发！验证Loss连续{self.early_stop_patience}轮未改善(阈值>{self.early_stop_min_delta})")
                 stopped_early = True
                 break
 
